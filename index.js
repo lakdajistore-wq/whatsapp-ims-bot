@@ -1,5 +1,6 @@
 /**
  * WHATSAPP IMS AUTOMATION BOT (RENDER + POSTGRESQL + GOOGLE SHEETS)
+ * Fixed: 'Waiting for this message' resolved with getMessage retry store.
  */
 const express = require('express');
 const { default: makeWASocket, DisconnectReason, BufferJSON, initAuthCreds } = require('@whiskeysockets/baileys');
@@ -24,6 +25,9 @@ let sock = null;
 let currentQR = null;
 let connectionStatus = "INITIALIZING";
 let connectedUser = null;
+
+// Store recently sent messages so WhatsApp can re-fetch encryption keys
+const msgStore = new Map();
 
 async function usePostgresAuthState(dbPool) {
   await dbPool.query(`
@@ -111,7 +115,16 @@ async function startWhatsAppBot() {
       auth: state,
       printQRInTerminal: true,
       logger: pino({ level: 'silent' }),
-      browser: ['Arawali IMS Bot', 'Chrome', '1.0.0']
+      browser: ['Arawali IMS Bot', 'Chrome', '120.0.0.0'],
+      markOnlineOnConnect: true,
+      syncFullHistory: false,
+      // Fix for "Waiting for this message": Handles retry requests for missing encryption keys
+      getMessage: async (key) => {
+        if (msgStore.has(key.id)) {
+          return msgStore.get(key.id);
+        }
+        return { conversation: "Live Stock Update" };
+      }
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -163,8 +176,16 @@ async function startWhatsAppBot() {
               body: text
             }, { timeout: 15000 });
 
+            // If reply received, send it and cache it for retry
             if (response.data && response.data.reply) {
-              await sock.sendMessage(from, { text: response.data.reply });
+              const sentMsg = await sock.sendMessage(from, { text: response.data.reply });
+              if (sentMsg && sentMsg.key) {
+                msgStore.set(sentMsg.key.id, sentMsg.message);
+                if (msgStore.size > 200) {
+                  const firstKey = msgStore.keys().next().value;
+                  msgStore.delete(firstKey);
+                }
+              }
             }
           } catch (err) {
             console.error("Apps Script forward error:", err.message);
@@ -230,7 +251,14 @@ app.post('/send-message', async (req, res) => {
   const jid = `${cleanPhone}@s.whatsapp.net`;
 
   try {
-    await sock.sendMessage(jid, { text: msgText });
+    const sentMsg = await sock.sendMessage(jid, { text: msgText });
+    if (sentMsg && sentMsg.key) {
+      msgStore.set(sentMsg.key.id, sentMsg.message);
+      if (msgStore.size > 200) {
+        const firstKey = msgStore.keys().next().value;
+        msgStore.delete(firstKey);
+      }
+    }
     return res.json({ success: true, to: cleanPhone });
   } catch (err) {
     return res.status(500).json({ error: err.message });
