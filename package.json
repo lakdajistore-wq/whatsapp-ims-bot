@@ -1,0 +1,19 @@
+{
+  "name": "whatsapp-ims-render-bot",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.9",
+    "axios": "^1.7.2",
+    "express": "^4.19.2",
+    "pg": "^8.12.0",
+    "pino": "^9.2.0",
+    "qrcode": "^1.5.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
